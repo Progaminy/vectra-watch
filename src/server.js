@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
@@ -437,7 +438,7 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.use(express.static(publicDir, { extensions: ["html"] }));
-app.get("*", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
+app.use((_req, res) => res.sendFile(path.join(publicDir, "index.html")));
 
 app.listen(PORT, () => {
   console.log(`Vectra Watch listening on port ${PORT}`);
