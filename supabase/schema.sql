@@ -90,15 +90,15 @@ create or replace function public.claim_mission(p_user_id uuid, p_run_id uuid)
 returns table(reward numeric, new_available numeric)
 language plpgsql
 security definer
-set search_path = public
+set search_path = ''
 as $$
 declare
-  v_run mission_runs%rowtype;
-  v_mission missions%rowtype;
+  v_run public.mission_runs%rowtype;
+  v_mission public.missions%rowtype;
   v_day date;
 begin
   select * into v_run
-  from mission_runs
+  from public.mission_runs
   where id = p_run_id and user_id = p_user_id
   for update;
 
@@ -115,7 +115,7 @@ begin
   end if;
 
   select * into v_mission
-  from missions
+  from public.missions
   where id = v_run.mission_id and active = true;
 
   if not found then
@@ -124,20 +124,20 @@ begin
 
   v_day := (now() at time zone 'Africa/Maputo')::date;
 
-  insert into mission_completions(user_id, mission_id, completion_day, reward)
+  insert into public.mission_completions(user_id, mission_id, completion_day, reward)
   values (p_user_id, v_mission.id, v_day, v_mission.reward);
 
-  update mission_runs
+  update public.mission_runs
   set completed_at = now()
   where id = p_run_id;
 
-  update wallets
+  update public.wallets
   set available = available + v_mission.reward,
       updated_at = now()
   where user_id = p_user_id
   returning available into new_available;
 
-  insert into transactions(user_id, kind, amount, status, metadata)
+  insert into public.transactions(user_id, kind, amount, status, metadata)
   values (
     p_user_id,
     'mission_reward',
@@ -163,10 +163,10 @@ create or replace function public.request_withdrawal(
 returns uuid
 language plpgsql
 security definer
-set search_path = public
+set search_path = ''
 as $$
 declare
-  v_wallet wallets%rowtype;
+  v_wallet public.wallets%rowtype;
   v_tx uuid;
 begin
   if p_amount < 400 then
@@ -178,7 +178,7 @@ begin
   end if;
 
   select * into v_wallet
-  from wallets
+  from public.wallets
   where user_id = p_user_id
   for update;
 
@@ -186,13 +186,13 @@ begin
     raise exception 'INSUFFICIENT_AVAILABLE_BALANCE';
   end if;
 
-  update wallets
+  update public.wallets
   set available = available - p_amount,
       locked = locked + p_amount,
       updated_at = now()
   where user_id = p_user_id;
 
-  insert into transactions(user_id, kind, amount, status, phone, operator)
+  insert into public.transactions(user_id, kind, amount, status, phone, operator)
   values (p_user_id, 'withdrawal', p_amount, 'pending', p_phone, p_operator)
   returning id into v_tx;
 
@@ -204,15 +204,15 @@ create or replace function public.approve_deposit(p_tx_id uuid)
 returns void
 language plpgsql
 security definer
-set search_path = public
+set search_path = ''
 as $$
 declare
-  v_tx transactions%rowtype;
-  v_user users%rowtype;
+  v_tx public.transactions%rowtype;
+  v_user public.users%rowtype;
   v_commission numeric(14,2);
 begin
   select * into v_tx
-  from transactions
+  from public.transactions
   where id = p_tx_id and kind = 'deposit'
   for update;
 
@@ -224,21 +224,21 @@ begin
     raise exception 'DEPOSIT_ALREADY_PROCESSED';
   end if;
 
-  update wallets
+  update public.wallets
   set available = available + v_tx.amount,
       updated_at = now()
   where user_id = v_tx.user_id;
 
-  update transactions
+  update public.transactions
   set status = 'approved', updated_at = now()
   where id = p_tx_id;
 
-  select * into v_user from users where id = v_tx.user_id;
+  select * into v_user from public.users where id = v_tx.user_id;
 
   if v_user.sponsor_id is not null then
     v_commission := round(v_tx.amount * 0.10, 2);
 
-    insert into transactions(
+    insert into public.transactions(
       user_id, kind, amount, status, parent_tx_id, metadata
     )
     values (
@@ -250,7 +250,7 @@ begin
       jsonb_build_object('referred_user_id', v_tx.user_id)
     );
 
-    update wallets
+    update public.wallets
     set available = available + v_commission,
         updated_at = now()
     where user_id = v_user.sponsor_id;
@@ -265,13 +265,13 @@ create or replace function public.transition_withdrawal(
 returns void
 language plpgsql
 security definer
-set search_path = public
+set search_path = ''
 as $$
 declare
-  v_tx transactions%rowtype;
+  v_tx public.transactions%rowtype;
 begin
   select * into v_tx
-  from transactions
+  from public.transactions
   where id = p_tx_id and kind = 'withdrawal'
   for update;
 
@@ -284,23 +284,23 @@ begin
   end if;
 
   if p_action = 'approve' then
-    update wallets
+    update public.wallets
     set locked = locked - v_tx.amount,
         updated_at = now()
     where user_id = v_tx.user_id;
 
-    update transactions
+    update public.transactions
     set status = 'approved', updated_at = now()
     where id = p_tx_id;
 
   elsif p_action = 'reject' then
-    update wallets
+    update public.wallets
     set locked = locked - v_tx.amount,
         available = available + v_tx.amount,
         updated_at = now()
     where user_id = v_tx.user_id;
 
-    update transactions
+    update public.transactions
     set status = 'rejected', updated_at = now()
     where id = p_tx_id;
   else
@@ -317,3 +317,16 @@ select * from (values
   ('Novo Artista', 'Lançamento Revelação — Monitoria de Som', 'kJQP7kiw5Fk', 60.00::numeric)
 ) as seed(category, title, youtube_id, reward)
 where not exists (select 1 from public.missions);
+
+
+-- SECURITY: funções financeiras SECURITY DEFINER são internas ao servidor.
+-- O Postgres concede EXECUTE a PUBLIC por padrão; revogamos explicitamente.
+revoke execute on function public.claim_mission(uuid, uuid) from public, anon, authenticated;
+revoke execute on function public.request_withdrawal(uuid, numeric, text, text) from public, anon, authenticated;
+revoke execute on function public.approve_deposit(uuid) from public, anon, authenticated;
+revoke execute on function public.transition_withdrawal(uuid, text) from public, anon, authenticated;
+
+grant execute on function public.claim_mission(uuid, uuid) to service_role;
+grant execute on function public.request_withdrawal(uuid, numeric, text, text) to service_role;
+grant execute on function public.approve_deposit(uuid) to service_role;
+grant execute on function public.transition_withdrawal(uuid, text) to service_role;
