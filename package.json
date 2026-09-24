@@ -1,0 +1,24 @@
+{
+  "name": "vectra-watch",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Vectra Watch — monitoria audiovisual com carteira controlada no servidor.",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.1.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "zod": "^4.1.11"
+  }
+}
